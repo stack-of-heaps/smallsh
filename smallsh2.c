@@ -8,6 +8,10 @@ void memsetArgs(char** argsArray) {
     }
 }
 
+void memsetThis(char* someStr, int length) {
+    memset(someStr, '\0', length);
+}
+
 void memFreeArgs(char** argsArray) {
     int i;
     for (i = 0; i < 512; i++) {
@@ -15,61 +19,128 @@ void memFreeArgs(char** argsArray) {
     }
 }
 
+//Takes command line buffer after > has been detected and grabs the filename.
+//Creates a file descriptor and returns it
+//If error, returns the error code
+int getFileToRead(char* buffer, char* filename) {
+
+    printf("getFiletoRead()\n");
+    memsetThis(filename, 512);
+    buffer += strlen("< ");
+    sscanf(buffer, "%s", filename);
+    printf("filename: '%s'\n", filename);
+    buffer += strlen(filename); //When we return, be ready to sscanf word after filename
+
+    int fd;
+    fd = open(filename, O_RDONLY); 
+
+    return fd;
+}
+
+//Takes command line buffer after < has been detected and grabs the filename.
+//Creates a file descriptor and returns it
+//If error, returns the error code
+int getFileToWrite(char* buffer, char* filename) {
+
+    printf("getFiletoWrite()\n");
+    memsetThis(filename, 512);
+    buffer += strlen("> ");
+    sscanf(buffer, "%s", filename);
+    printf("filename: '%s'\n", filename);
+    buffer += strlen(filename); //When we return, be ready to sscanf word after filename
+
+    int fd;
+    fd = open(filename, O_CREAT | O_WRONLY | O_APPEND, 0600); 
+
+    return fd;
+}
+
 int parseCmdLine(char* buffer, char** args, char* cmd) {
 
+    int readFd;         //Upon sscanf'ing a <, save a file descriptor to this
+    int writeFd;        //Upon sscanf'ing a >, save a file descriptor to this
+    int backupStdout;   //After >, dup2 this
+    int backupStdin;    //After <, dup2 this
+    char filename[512];
+    int readFlag = 0;
+    int writeFlag = 0;
+
     char tempArg[512];
-    memset(tempArg, '\0', 512);
+    memsetThis(tempArg, 512);
     int numArgs = 0;
-    char* strItr = buffer;      //Start sscanf looking PAST the first word we've already inserted into arg[0];
+
+    char* strItr = buffer; //Holds sscanf input
     while (sscanf(strItr, "%[.0-9A-Za-z<>*""''&-]", tempArg) != EOF) {
 
         //If we aren't reading in a redirect char, read input string as normal arg/cmd
         if (strcmp(tempArg, "<") != 0 && strcmp(tempArg, ">") != 0) {
-            printf("TEMPARG: '%s'\n", tempArg);
             strcpy(args[numArgs], tempArg);
             strItr += strlen(tempArg) + 1;  //Start scanning for next arg AFTER this one + space
-            printf("Arg: %s\n", tempArg);
-            memset(tempArg, '\0', 500);
+            memsetThis(tempArg, 512);
             numArgs++;
         }
-        else {
-            //Write redirect char
-            //1) Grab following arg as filename
-            //2) Create file descriptor; backup STDOUT
-            //3) Finalize args array by appending NULL
-            //4) Redirect stdout to fileptr from 2
-            //5) Runproc
-            if (strcmp(tempArg, ">") == 0) {
-                printf("IN WRITING MODE\n");
+        else if (strcmp(tempArg, "<") == 0) {
+            readFd = getFileToRead(strItr, filename);
+            readFlag = 1;
 
-                char fileName[512];
-                memset(fileName, '\0', 512);
-                strItr += strlen("> ");
-                sscanf(strItr, "%s", fileName);
-                printf("filename: '%s'\n", fileName);
+            if (readFd == EACCES || 
+                          EFAULT || 
+                          ENFILE ||    
+                          ENODEV || 
+                          ENOENT ||
+                          ENOTDIR || 
+                          ENXIO || 
+                          EOVERFLOW || 
+                          ETXTBSY || 
+                          ENOTDIR)  {
+                            perror("FILE READ: \n");
+                            break;
+                          };
+           }
+        
+        else if (strcmp(tempArg, ">") == 0) {
+            writeFd = getFileToWrite(strItr, filename);
+            writeFlag = 1;
+            
+            if (writeFd == EACCES || 
+                          EEXIST || 
+                          EFAULT ||
+                          EINVAL ||
+                          EISDIR ||
+                          ENAMETOOLONG ||
+                          ENFILE ||    
+                          ENODEV || 
+                          ENOENT ||
+                          ENOTDIR || 
+                          ENXIO || 
+                          EOVERFLOW || 
+                          ETXTBSY || 
+                          ENOTDIR)  {
+                            perror("FILE WRITE: \n");
+                            break;
+                          };
 
-                args[numArgs] = NULL;
-                
-                int fd;
-                fd = open(fileName, O_CREAT | O_WRONLY | O_APPEND, 0600); 
-
-                int saved_stdout = dup(1);
-                dup2(fd, 1);
-
-                lastStatus = runProcess(cmd, args);
-
-                dup2(saved_stdout, 1);
-                close(saved_stdout);
-                return -1;
-            }
-        }
+       }
     }
 
-    args[numArgs] = NULL;
-
-    if (strcmp(cmd, "cd") == 0) {
-        return 1;
+    //If we've encountered a >, setup stdout redirect
+    if (writeFlag == 1) {
+        backupStdout = dup(1);
+        dup2(readFd, 1);
     }
+
+    //If we've encountered a <, setup stdin redirect
+    if (readFlag == 1) {
+        backupStdin = dup(0);
+        dup2(writeFd, 0);
+    }
+
+    lastStatus = runProcess(cmd, args);
+    dup2(backupStdout, 1);
+    close(backupStdout);
+    dup2(backupStdin, 0);
+    close(backupStdin);
+
 }
 
 //Using execvp, runs process specified by cmd along with everything in args[]
@@ -159,7 +230,7 @@ int main() {
     while(1) {
         while(1) {
             memsetArgs(args);
-            memset(cmdLineBuffer, '\0', 2048);
+            memsetThis(cmdLineBuffer, 2048);
             printf("%s", prompt);
             fflush(stdout);
             cmdStatus = getline(&cmdLineBuffer, &maxBuf, stdin);

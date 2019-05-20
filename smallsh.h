@@ -15,6 +15,10 @@ void memFreeArgs(char** argsArray);
 int parseCmdLine(char* buffer, char** args, char* cmd);
 int parseAndRead(char* buffer, char** args, char* cmd);
 int parseAndWrite(char* buffer, char** args, char* cmd);
+int getFileToRead(char* buffer, char* filename);
+int getFileToWrite(char* buffer, char* filename);
+void memsetThis(char* someStr, int length);
+
 
 void parseCommandLineRedirects(char* cmdInput, int n);
 int runProcess(char* cmd, char** args);
