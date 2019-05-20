@@ -1,4 +1,5 @@
 #include "smallsh.h"
+static int lastStatus = 0;
 
 void memsetArgs(char** argsArray) {
     int i;
@@ -20,13 +21,49 @@ int parseCmdLine(char* buffer, char** args, char* cmd) {
     memset(tempArg, '\0', 512);
     int numArgs = 0;
     char* strItr = buffer;      //Start sscanf looking PAST the first word we've already inserted into arg[0];
-    while (sscanf(strItr, "%[.0-9A-Za-z""''&-]", tempArg) != EOF) {
-        strcpy(args[numArgs], tempArg);
-        strItr += strlen(tempArg) + 1;  //Start scanning for next arg AFTER this one + space
-        printf("Arg: %s\n", tempArg);
-        memset(tempArg, '\0', 500);
-        numArgs++;
+    while (sscanf(strItr, "%[.0-9A-Za-z<>*""''&-]", tempArg) != EOF) {
+
+        //If we aren't reading in a redirect char, read input string as normal arg/cmd
+        if (strcmp(tempArg, "<") != 0 && strcmp(tempArg, ">") != 0) {
+            printf("TMEPARG: '%s'\n", tempArg);
+            strcpy(args[numArgs], tempArg);
+            strItr += strlen(tempArg) + 1;  //Start scanning for next arg AFTER this one + space
+            printf("Arg: %s\n", tempArg);
+            memset(tempArg, '\0', 500);
+            numArgs++;
         }
+        else {
+            //Write redirect char
+            //1) Grab following arg as filename
+            //2) Create file descriptor; backup STDOUT
+            //3) Finalize args array by appending NULL
+            //4) Redirect stdout to fileptr from 2
+            //5) Runproc
+            if (strcmp(tempArg, ">") == 0) {
+                printf("IN WRITING MODE\n");
+
+                char fileName[512];
+                memset(fileName, '\0', 512);
+                strItr += strlen("> ");
+                sscanf(strItr, "%s", fileName);
+                printf("filename: '%s'\n", fileName);
+
+                args[numArgs] = NULL;
+                
+                int fd;
+                fd = open(fileName, O_CREAT | O_WRONLY | O_APPEND, 0600); 
+
+                int saved_stdout = dup(1);
+                dup2(fd, 1);
+
+                lastStatus = runProcess(cmd, args);
+
+                dup2(saved_stdout, 1);
+                close(saved_stdout);
+                return -1;
+            }
+        }
+    }
 
     args[numArgs] = NULL;
 
@@ -34,7 +71,6 @@ int parseCmdLine(char* buffer, char** args, char* cmd) {
         return 1;
     }
 }
-
 
 //Using execvp, runs process specified by cmd along with everything in args[]
 //Uses a fork to run process, then blocks with waitpid()
@@ -78,9 +114,6 @@ waitpid()   -- blocks until specific child process terminates; OR, passed specia
           if a process terminates normally, then WIFEXITED macro returns non-zero:
               if (WIFEXITED(child) !=0)  ---->   printf("the process exited normally\n");
 
-TO GET ACTUAL EXIT STATUS, MUST EXAMINE FLAG: int exitStatus = WEXITSTATUS(child);
-          If exited successfully, WIFEXITED macro returns non-zero
-
 SIGNAL TERMINATION
           --If process terminated by signal, WIFSIGNALED macro returns non-zero
               if (WIFSIGNALED(cihldExitMethod!= 0)) -> printf("Process terminated by a signal")
@@ -92,32 +125,14 @@ EXEC            Replaces currently running program with NEW ONE specified by us
                   --Executes program specified by path, and gives command line args
        int execV(char *path, char* argv[]);
                   --Executes program at path, and gives command line args indicated by pointers in argv
-       getcwd() gets current dir
-       chdir() sets current dir
-
-TO USE EXEC, PAIR IT WITH *FORK*
-       1) fork main proc
-             fork() -- creates child process --> spawnPID = fork()
-       2) use exec on child
-       3) keep track of PID and kill process when finished / no longer needed
-
-EXECL("ls", "ls", "-a", NULL); // NULL says "end of args" to function
-EXECVP
-    char* args[3] = {"ls, "-a", NULL};
-    execvp(args[0], args);
-    spawnPID = fork();
-
 EXIT()
     **atExit() registers function to RUN BEFORE EXIT()
     --Calls all functions registered by atexit()
     --Flushes all STDIO output
     --Removes files created by tmpfile()
     --Calls _exit (cleans up everything, like return 0 from main() function)
-
-ENV VARIABLES
  */  
 
-static int lastStatus = 0;
 
 int main() {
 
@@ -168,9 +183,9 @@ int main() {
        //Remove \n from input
        
        //First "word" will be the program to call
+       cmdLineBuffer[strcspn(cmdLineBuffer, "\n")] = '\0';
        cmd = calloc(100, 1);
        sscanf(cmdLineBuffer, "%s", cmd);
-       cmdLineBuffer[strcspn(cmdLineBuffer, "\n")] = '\0';
 
         //Here we check the cmd passed in. If it's cd, exit, or status, they are special commands
         //and are handled individually.
@@ -188,54 +203,9 @@ int main() {
            strcpy(args[0], cmd);
            args[1] = NULL;
            lastStatus = runProcess(cmd, args);
+           fflush(stdout);
            }
        }
-       else {
-
-       //Get subsequent args:
-       //0) Save position of command; use it to get position of following args
-       //1) Check for < char
-       //   If present, note position
-       //2) Check for > char
-       //   If present, note position
-       //3) If both < & >, see which is first
-       //4) 
-       
-       //First we'll check for read/write chars
-       char* readCharLoc = strchr(cmdLineBuffer, '<');
-       char* writeCharLoc = strchr(cmdLineBuffer, '>');
-
-       //Check for presence of & char
-       char* ampersand = strchr(cmdLineBuffer, '&');
-
-       //If both are present, we need to see which is first
-       if (readCharLoc && writeCharLoc) {
-           int firstCharDist = 0;
-           readCharDist = 0;
-           writeCharDist = 0;
-           printf("Both present\n");
-
-           readCharDist = strcspn(cmdLineBuffer, "<");
-           writeCharDist =  strcspn(cmdLineBuffer, ">");
-
-           printf("<: %d\n", readCharDist);
-           printf(">: %d\n", writeCharDist);
-
-           //Get the smallest distance; assign to firstCharDist
-           if (readCharDist < writeCharDist) {
-               firstCharDist = readCharDist;
-           }
-           else {
-               firstCharDist = writeCharDist;
-           
-        char firstHalf[2048];
-        char secondHalf[2048];
-        memcpy(firstHalf, "\0", 2048);
-        memcpy(secondHalf, "\0", 2048);
-           }
-        
-       }
-
        //else if ONLY ONE READ/WRITE CHAR IS PRESENT....)
 
         //Otherwise, we've got one cmd with one or more args to vacuum up and pass on
@@ -253,6 +223,12 @@ int main() {
             char* path = args[1];
             chdir(path);
         }
+        //-1 means we've already parsed and executed a process
+        //which uses dup2 on stdout, executes the cmd, then restores stdout
+        //go back to smallsh prompt
+        else if (retFlag == -1) {
+        //    continue;
+        }
         else {
             lastStatus = runProcess(cmd, args);
                     }
@@ -264,10 +240,9 @@ int main() {
     //memFreeArgs(args);
     //free(args);
 
+    return 0;
     }
 
-    return 0;
-}
 /*
 // READ IN ADN WRITE TO < > commands (wc < junk > junk2
 //if last char is &, perform in background
@@ -301,7 +276,6 @@ void killAllProcesses();
 
 //Changes current program's PWD to $HOME env variable path unless a path is passed in
 void cd(char* pathIn) {
-    printf("in cd");
 
     if (pathIn == NULL) {
         char* path;
@@ -312,7 +286,6 @@ void cd(char* pathIn) {
         chdir(pathIn);
     }
 }
-
 
 int quit();
 
