@@ -53,12 +53,13 @@ int getFileToWrite(char* buffer, char* filename) {
     return fd;
 }
 
-int parseCmdLine(char* buffer, char** args, char* cmd, char* readFile, char* writeFile) {
+int parseCmdLine(char* buffer, char** args, char* cmd) {
 
     int readFd = -5;         //Upon sscanf'ing a <, save a file descriptor to this
     int writeFd = -5;        //Upon sscanf'ing a >, save a file descriptor to this
     int backupStdout;   //After >, dup2 this
     int backupStdin;    //After <, dup2 this
+    char filename[512];
     int readFlag = 0;
     int writeFlag = 0;
 
@@ -94,23 +95,27 @@ int parseCmdLine(char* buffer, char** args, char* cmd, char* readFile, char* wri
             numArgs++;
         }
         else if (strcmp(tempArg, "<") == 0) {
-            strItr += strlen("< ");
-            memsetThis(tempArg, 512);
-            memsetThis(readFile, 512);
-            sscanf(strItr, "%[.0-9A-Za-z<>/*""''&-]", tempArg);
-            strcpy(readFile, tempArg);
-            strItr += strlen(tempArg) + 1;
+            readFd = getFileToRead(strItr, filename);
+            if (readFd == -1) {
+                printf("bad filename: %s\n", filename);
+                return -1;
             }
 
+            strItr += strlen(filename) + 1;  //Start scanning for next arg AFTER this one + space
+            strItr++;
+            readFlag = 1;
+           }
         
         else if (strcmp(tempArg, ">") == 0) {
-            strItr += strlen("> ");
-            memsetThis(tempArg, 512);
-            memsetThis(writeFile, 512);
-            sscanf(strItr, "%[.0-9A-Za-z<>/*""''&-]", tempArg);
-            printf("writefile: %s\n", tempArg);
-            strcpy(writeFile, tempArg);
-            strItr += strlen(tempArg) + 1;
+            writeFd = getFileToWrite(strItr, filename);
+            if (writeFd == -1) {
+                printf("bad filename: %s\n", filename);
+                return -1;
+            }
+
+            strItr += strlen(filename) + 1;  //Start scanning for next arg AFTER this one + space
+            strItr++;
+            writeFlag = 1;
        }
     }
 
@@ -155,10 +160,11 @@ int runProcess(char* cmd, char** args, char* readFile, char* writeFile) {
 
     if (childPID == 0) {
         execvp(cmd, args);
+        exit(0);
     }
        
         if (strcmp(readFile, "")) {
-            printf("READFILE PRESENT\n");
+            printf("WRITEFILE PRESENT\n");
             readFrom = open(readFile, O_RDONLY);
             if (readFrom == -1) {
                 printf("bad file: %s\n", readFile);
@@ -166,21 +172,14 @@ int runProcess(char* cmd, char** args, char* readFile, char* writeFile) {
                 return;
             }
 
-            dup2(readFrom, 0);
-            fcntl(readFrom, F_SETFD, FD_CLOEXEC);
+            dup2(writeFrom, 1);
+            fcntl(writeFrom, F_SETFD, FD_CLOEXEC);
         }
 
         //If we've encountered a <, setup stdin redirect
-        if (strcmp(writeFile, "")) {
-            printf("WRITEFILE PRESENT\n");
-            writeTo = open(writeFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-            if (writeTo == -1) {
-                printf("bad file: %s\n", writeFile);
-                lastStatus = -1;
-                return;
-            }
-            dup2(writeTo, 1);
-            fcntl(writeTo, F_SETFD, FD_CLOEXEC);
+        if (readFlag == 1) {
+            dup2(readFd, 0);
+            fcntl(readFd, F_SETFD, FD_CLOEXEC);
         }
 
         //block and wait until child has terminated
@@ -230,10 +229,7 @@ int main() {
     char* alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     int cmdLength = 0;
     int lastExitStatus = 0;
-    char readFile[512];
-    char writeFile[512];
-    memsetThis(readFile, 512);
-    memsetThis(writeFile, 512);
+    char
 
     //Allocate memory
     args = calloc(512, sizeof(char*));
@@ -286,7 +282,8 @@ int main() {
            else {
            strcpy(args[0], cmd);
            args[1] = NULL;
-           lastStatus = runProcess(cmd, args, readFile, writeFile);
+           lastStatus = runProcess(cmd, args);
+           fflush(stdout);
            }
        }
 
@@ -297,7 +294,7 @@ int main() {
 
             //parseCmdLine will look for cd + path arg here 
             //cd = 1; 
-            lastStatus = parseCmdLine(cmdLineBuffer, args, cmd, readFile, writeFile);
+            lastStatus = parseCmdLine(cmdLineBuffer, args, cmd);
             printf("retflag: %d\n", retFlag);
 
             //execute chdir with path in args[1] 

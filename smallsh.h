@@ -13,6 +13,7 @@
 void memsetArgs(char** argsArray);
 void memFreeArgs(char** argsArray);
 int parseCmdLine(char* buffer, char** args, char* cmd);
+int getAndParse(char* buffer, char** args, char* readFile, char* writeFile);
 int parseAndRead(char* buffer, char** args, char* cmd);
 int parseAndWrite(char* buffer, char** args, char* cmd);
 int getFileToRead(char* buffer, char* filename);
