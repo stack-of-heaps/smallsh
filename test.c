@@ -12,18 +12,14 @@ void runCDcmd();
 int main()
 {
 
-    pid_t childPID;
-    int pidStatus = -5;
-    int exitCode = -5;
-    char path[256];
-
-    chdir("..");
-
-
-    chdir("adventure");
-
-    getcwd(path, sizeof(path));
-    printf("%s", path);
-
+while(1){
+    printf("OUTER\n");
+    while(1){
+    printf("INNER\n");
+    printf("INNER\n");
+    break;
+    }
+    printf("OUTER2\n");
+}
     return 0;
 }
