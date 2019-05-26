@@ -1,17 +1,20 @@
+
 #include "smallsh.h"
 static int lastStatus = 0;
 static int allowBackgroundFlag = 0;
 static int childPIDstatus = 0;
-static int bgExitStatus = 0;
 size_t maxBuf = 2048;
 
-/*************************************************************
- * DESCRIPTION: If ctrl + z is pressed in the main process, this function is called.
- * Toggles between allowBackgroundFlag = 1 and 0. 
- * If 0, background processes will be allowed to run.
- * If 1, background processes will not be allowed to run.
- * We are using write() instead of printf() for reentrant property
- * /////////////////////////////////////////////////////////*/
+/***************************************************************
+ * 			void catchSIGTSTP(int)
+ *
+ * When SIGTSTP is called, toggle the allowBackground boolean.
+ *
+ * INPUT:
+ * 	int signo		Required, according to the homework. Isn't used.
+ *
+***************************************************************/
+//we use write() instead of printf() for reentrant property
 void watchSIGTSTP() {
 
     //reset our background flag, if set
@@ -22,6 +25,7 @@ void watchSIGTSTP() {
 		allowBackgroundFlag = 0;
 	}
 
+    //
 	else {
 		char* alert = "Exiting foreground-only mode\n";
 		write(1, alert, 29);
@@ -30,27 +34,7 @@ void watchSIGTSTP() {
 	}
 }
 
-/*************************************************************
- * DESCRIPTION: Handles requirement for our shell to print the last exit code of
- * the most recently exited/killed process. Called when user types 'status' in the
- * command line prompt.
- * /////////////////////////////////////////////////////////*/
-void printLastStatus() {
 
-    //If "normal" exit code
-	if (WIFEXITED(lastStatus)) {
-		printf("Last exit status code: %d\n", WEXITSTATUS(lastStatus));
-	} else {
-        //Otherwise, terminated by a signal
-		printf("Last exit signal code:  %d\n", WTERMSIG(lastStatus));
-	}
-}
-
-/*************************************************************
- * DESCRIPTION: Simple helper function that allocates memory to our args struct,
- * which is a char** array that holds up to 200 char strings for each index value
- * of args[i].
- * /////////////////////////////////////////////////////////*/
 void memsetArgs(char** argsArray) {
     int i;
     for (i = 0; i < 512; i++) {
@@ -59,36 +43,21 @@ void memsetArgs(char** argsArray) {
     }
 }
 
-/*************************************************************
- * DESCRIPTION: Simple helper function that allocates memory to a given char* pointer
- * for the given length # of bytes. Sets those bytes to '\0'
- * /////////////////////////////////////////////////////////*/
 void memsetThis(char* someStr, int length) {
     memset(someStr, '\0', length);
 }
 
-/*************************************************************
- * DESCRIPTION: After we have parsed input, this runs. It takes a char** args, which is an 
- * array of strings which contain our commands to be executed. The last value of the array
- * will always be "NULL" for execvp() to run properly.
- * It also takes readFile and writefile char* pointers. If they contains values, they are 
- * read, a file descriptor is created, and stdout/stdin is redirected to the file pointer
- * so that the given command will execute properly in the sub-process.
- * Our sigaction struct facilitates ctrl+c being able to kill the child process.
- * Run as background is 1 if our parse function has detected a & at the end of input
- * and if allowBackgroundFlag is 0.
- * /////////////////////////////////////////////////////////*/
 int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa, int runAsBackground ) {
 
     int readFd, writeFd;
     int fdResult;
-    int backupStdin = dup(1);       //In case we redirect input/output, backup here
-    int backupStdout = dup(0);
+    int backupStdin, backupStdout;
+    pid_t childPID;
     int pidStatus = -5;
-    pid_t exitCode = -5;
-    pid_t bgPID = -5;
-    pid_t childPID = -5;
+    int exitCode = -5;
+    printf("readfile: %s, writefile: %s\n", readFile, writeFile);
     int retTest = strcmp(readFile, "");
+    printf("retTest: %d\n", retTest);
 
         childPID = fork();
 
@@ -117,6 +86,7 @@ int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa
                     //Create filein file descriptor
                     //Redirect stdin
                     //Copy stdin so we can restore it
+                    backupStdin = dup(1);
                     fdResult = dup2(readFd, 0);
                     if (fdResult == -1) {
                         printf("Error in input redirection.\n");
@@ -126,7 +96,7 @@ int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa
                 }
 
                 if (strcmp(writeFile, "") == 1) {
-                    printf("writefile: %s\n", writeFile);
+                    printf("rritefile: %s\n", writeFile);
                     writeFd = open(writeFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
                     if (writeFd == -1) {
                         printf("%s is a bad file. Unable to open.\n", writeFile);
@@ -135,6 +105,7 @@ int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa
                     //Create fileout file descriptor
                     //Redirect stdout
                     //Copy stdout so we can restore it
+                    backupStdout = dup(0);
                     fdResult = dup2(writeFd, 1);
                     if (fdResult == -1) {
                         printf("Error in output redirection.\n");
@@ -146,46 +117,52 @@ int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa
                 //printf("before execvp\n");
                 //printf("args[0]: %s\n", args[0]);
 
-                lastStatus = execvp(args[0], args);
+                execvp(args[0], args);
                 dup2(backupStdout, 1);
                 close(backupStdout);
                 dup2(backupStdin, 0);
                 close(backupStdin);
 
                 break;
-        }
 
-        //If we haven't disabled run-in-background,
-        //and & was found in cmdline, run as background process
-        if (allowBackgroundFlag && runAsBackground == 1) {
-            pid_t childPID = waitpid(childPID, lastStatus, WNOHANG);
-            printf("Background PID: %d\n", childPID);
-            fflush(stdout);
-        }
-        // Otherwise execute it like normal
-        else {
-            lastStatus = waitpid(childPID, lastStatus, 0);
-            fflush(stdout);
-        }
 
-        // Check for terminated background processes
-        //Option B from Program 3 description: Check periodically if
-        //any child processes have terminated via signal handler.
-        while ((childPID = waitpid(-1, lastStatus, WNOHANG)) > 0) {
-            printf("Child Process %d terminated\n", childPID);
-            //getBGExitStatus(bgExitStatus);
-            fflush(stdout);
-        }
 
-        //Finally, block out main process until child has terminated
-        if(waitpid(childPID, lastStatus, 0) > 0) {
-            lastStatus = WEXITSTATUS(pidStatus);
-        }
+            default:;
+    }
+
+            if (allowBackgroundFlag && runAsBackground == 1) {
+				pid_t actualPid = waitpid(childPID, childPIDstatus, WNOHANG);
+				printf("Background PID: %d\n", childPID);
+				fflush(stdout);
+			}
+			// Otherwise execute it like normal
+			else {
+				pid_t actualPid = waitpid(childPID, childPIDstatus, 0);
+                fflush(stdout);
+
+			}
+
+		// Check for terminated background processes
+		while ((childPID = waitpid(-1, childPIDstatus, WNOHANG)) > 0) {
+			printf("Child Process %d terminated\n", childPID);
+			//printExitStatus(*childExitStatus);
+			fflush(stdout);
+
+                }
+
+                //block and wait until child has terminated
+                //if waitPID returns > 0, process success
+                if(waitpid(childPID, &pidStatus, 0) > 0) {
+                    lastStatus = WEXITSTATUS(pidStatus);
+                }
+
 }
+
 
 int getAndParse(char* buffer, char** args, char* readFile, char* writeFile, int* backgroundFlag) {
     int numArgs = 0;
     int cmdStatus = 0;
+
     memsetThis(buffer, 2048);
     memsetThis(readFile, 2048);
     memsetThis(writeFile, 2048);
@@ -222,7 +199,6 @@ int getAndParse(char* buffer, char** args, char* readFile, char* writeFile, int*
         }
     }
 
-    //Start parsing command line input
     char* token = strtok(buffer, " ");
 
     int i;
@@ -274,8 +250,8 @@ int main() {
     args = calloc(512, sizeof(char*));
 
     int cmdStatus = -5;
-    char readFile[2048];
-    char writeFile[2048];
+    char readFile[512];
+    char writeFile[512];
 
     int readFd;                         //read and write file descriptors
     int writeFd;
@@ -317,39 +293,42 @@ int main() {
             }
         }
 
-        //We need to execute any directory related commands here in the main proc
-        //If "cd", handle it here
-        if (strcmp(args[0], "cd") == 0) {
-            if (args[1] == NULL) {
-                char* path = getenv("HOME");
-                chdir(path);
+            //We need to execute any directory related commands here in the main proc
+            //If "cd", handle it here
+            if (strcmp(args[0], "cd") == 0) {
+                if (args[1] == NULL) {
+                    printf("going home\n");
+                    char* path = getenv("HOME");
+                    chdir(path);
+                    continue;
+                }
+                else {
+                    chdir(args[1]);
+                    continue;
+                }
+            }
+
+            //Special command: "quit"
+            //Kill all child processes, then exit(0)
+            else if (strcmp(args[0], "quit") == 0) {
+                exit(0);
+            }
+
+            //Special command: "status"
+            //Return last exit status code
+            else if (strcmp(args[0], "status") == 0) {
+                printf("%d\n", lastStatus);
+                fflush(stdout);
                 continue;
             }
+
+            //All other commands:
             else {
-                chdir(args[1]);
-                continue;
+                lastStatus = runProcess(args, readFile, writeFile, sa_sigint, runInBackground);
             }
         }
-
-        //Special command: "quit"
-        //Kill all child processes, then exit(0)
-        else if (strcmp(args[0], "quit") == 0) {
-            exit(0);
-        }
-
-        //Special command: "status"
-        //Return last exit status code
-        else if (strcmp(args[0], "status") == 0) {
-            printLastStatus();
-            fflush(stdout);
-            continue;
-        }
-
-        //All other commands:
-        else {
-            lastStatus = runProcess(args, readFile, writeFile, sa_sigint, runInBackground);
-        }
-    }
     fflush(stdout);
     return 0;
 }
+
+
