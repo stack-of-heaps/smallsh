@@ -1,3 +1,12 @@
+/**************************************************************
+ * NAME: KYLE KARTHAUSER
+ * DATE: 5/25/19
+ * COURSE: CS344-400
+ * DESCRIPTION: "Small shell" program which runs normal bash commands,
+ * runs processes in background, tracks all processes, and responds to 
+ * special commands "status" and "exit."
+ * ////////////////////////////////////////////////////////////*/
+
 #include "smallsh.h"
 static int lastStatus = 0;
 static int allowBackgroundFlag = 0;
@@ -106,8 +115,8 @@ int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa
                 //Begin execution section
                 //1) Create input/output file descriptors if necessary
                 //2) Execute commands found in args: execvp(args[0], args);
-                if (strcmp(readFile, "") == 1) {
-                    printf("readfile\n");
+                if (strcmp(readFile, "") != 0) {
+                    //printf("readfile\n");
                     readFd = open(readFile, O_RDONLY);
                     if (readFd == -1) {
                         printf("%s is a bad file. Unable to open.\n", readFile);
@@ -125,8 +134,8 @@ int runProcess(char** args, char* readFile, char* writeFile, struct sigaction sa
                     }
                 }
 
-                if (strcmp(writeFile, "") == 1) {
-                    printf("writefile: %s\n", writeFile);
+                if (strcmp(writeFile, "") != 0) {
+                    //printf("writefile: %s\n", writeFile);
                     writeFd = open(writeFile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
                     if (writeFd == -1) {
                         printf("%s is a bad file. Unable to open.\n", writeFile);
@@ -256,12 +265,10 @@ int getAndParse(char* buffer, char** args, char* readFile, char* writeFile, int*
         }
 
     //Make sure we add NULL after the final arg in our args[] array for execvp()
-    args[numArgs] = NULL;
-    for (int i = 0; i < numArgs; i++) {
-        printf("ARGS[%d]: %s\n", i, args[i]);
-    }
 
-        return 0;
+    args[numArgs] = NULL;
+
+    return 0;
     }
 
 int main() {
